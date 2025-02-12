@@ -1,0 +1,44 @@
+body {
+    background: url("./img/meadow2.png");
+    background-size: 100vw, 100vw;
+}
+
+* {
+    image-rendering: pixelated;
+    font-family: "Jacquard 24";
+}
+
+header {
+    font-size: 48px;
+}
+
+.header {
+    font-size: 24px;
+}
+
+.border {
+    border: 3px outset #647040;
+    background-color: rgb(57, 78, 47, 85%);
+    padding: 18px 36px;
+    color: white;
+}
+
+.content {
+    color: white;
+}
+
+a {
+    color: #e31933;
+    padding: 1px;
+}
+
+a:hover,
+a:focus {
+    background-color: #766174;
+    color: white;
+}
+
+.container {
+    max-width: 85%;
+    margin: 1rem auto;
+}
