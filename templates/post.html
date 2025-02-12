@@ -4,7 +4,7 @@
         <meta charset="UTF-8" />
         <meta name="viewport" content="width=device-width, initial-scale=1.0" />
         <title>Techrocks Blog</title>
-        <link rel="stylesheet" href="style.css" />
+        <link rel="stylesheet" href="../style.css" />
         <link rel="preconnect" href="https://fonts.googleapis.com" />
         <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
         <link
@@ -27,31 +27,15 @@
                     </div>
                     <br />
                     <div class="content border">
-                        <div class="header">Post Directory</div>
+                        <div class="header">Back</div>
                         <div style="margin-top: 10px" class="directory">
-                            <a
-                                href="./posts/local-development-with-infisical.html"
-                                >- 2/12/2025 Local Development With Infisical
-                            </a>
+                            <a href="/">- Back to Home</a>
                         </div>
                     </div>
                 </div>
 
                 <div class="container" style="margin-top: 1rem">
-                    <div class="border">
-                        <div class="header">About Us</div>
-                        <p>
-                            FerretCode Freelancing is a seasoned team of
-                            fullstack, DevOps, and bot developers.
-                        </p>
-                        <p>
-                            We've delivered 80+ client projects, and maintain
-                            several open-source utilities and projects at
-                            <a href="https://github.com/ferretcode-freelancing"
-                                >our github</a
-                            >
-                        </p>
-                    </div>
+                    <div class="border">{{.Content}}</div>
                 </div>
             </div>
         </main>

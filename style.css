@@ -1,3 +1,10 @@
+@font-face {
+    font-family: "Junicode";
+    src: url("/fonts/JunicodeVF-Roman.woff2") format("woff2");
+    font-weight: normal;
+    font-style: normal;
+}
+
 body {
     background: url("./img/meadow2.png");
     background-size: 100vw, 100vw;
@@ -10,10 +17,24 @@ body {
 
 header {
     font-size: 48px;
+    color: #a9bb71;
+    text-align: center;
+}
+
+pre {
+    white-space: pre-wrap;
+}
+
+code {
+    font-family: "Courier Prime";
+    word-wrap: break-word;
 }
 
 .header {
     font-size: 24px;
+    color: #a9bb71;
+    text-align: center;
+    font-family: "Junicode";
 }
 
 .border {
@@ -27,9 +48,21 @@ header {
     color: white;
 }
 
+h1,
+h2,
+h3,
+h4,
+h5,
+h6,
+li,
+strong {
+    font-family: "Junicode";
+}
+
 a {
     color: #e31933;
     padding: 1px;
+    font-family: "Junicode";
 }
 
 a:hover,
@@ -38,7 +71,36 @@ a:focus {
     color: white;
 }
 
-.container {
-    max-width: 85%;
-    margin: 1rem auto;
+p {
+    font-family: "Junicode";
+}
+
+@media only screen and (max-width: 600px) {
+    .container {
+        max-width: 85%;
+        margin: 1rem auto;
+    }
+}
+
+@media only screen and (min-width: 992px) {
+    .container {
+        max-width: 50%;
+        margin: 1rem auto;
+    }
+
+    .header {
+        font-size: 36px;
+    }
+
+    p {
+        font-size: 24px;
+    }
+
+    .directory {
+        font-size: 24px;
+    }
+}
+
+.directory {
+    text-align: center;
 }
