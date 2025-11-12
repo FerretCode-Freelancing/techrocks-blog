@@ -10,7 +10,7 @@ In applications that require multiple embedded devices, synchronization, managem
 
 MQTT is a messaging protocol for embedded applications that follows a pub-sub architecture that's designed for IoT applications and low-bandwidth/power applications. Clients (the devices in this case) generally publish messages to a central broker under different "topics," which are then routed to other clients subscribed to that topic. Moreover, MQTT is bidirectional, meaning devices can both listen and subscribe to interested topics.
 
-Firstly, MQTT is a lightweight protocol which is simple to implement in code and requires little processing power, meaning it's suitable for resource-constrained environments. It's also scalable and efficient--payloads are often small, and both the protocol and many brokers alike are designed to handle lots of connected devices. Finally, MQTT brokers can be configured with several authentication methods like username/password or client certificate auth.
+MQTT is also a lightweight protocol which is simple to implement in code and requires little processing power, meaning it's suitable for resource-constrained environments. It's also scalable and efficient--payloads are often small, and both the protocol and many brokers alike are designed to handle lots of connected devices. Finally, MQTT brokers can be configured with several authentication methods like username/password or client certificate auth.
 
 Furthermore, one of MQTTs draws is reliability. The protocol supports several reliability features that are designed to ensure messages are delivered even over unreliable networks.
 
@@ -39,7 +39,7 @@ One of MQTT's main reliability mechanisms is the use of Quality of Service (QoS)
 
 These QoS levels are the first step in building a reliable message delivery flow. Additionally, MQTT also has other reliability mechanisms; one of which is persistent sessions.
 
-When using persistent sessions, when a client connects the broker stores client's subscriptions, and queues missed QoS 1 and 2 messages while the client is offline. When that same client reconnects, the broker will deliver the queued messages, ensuring no data is lost during temporary disconnections.
+When using persistent sessions, a client will connect to the broker, which stores the client's current subscriptions, and queues missed QoS 1 and 2 messages while the client is offline. When that same client reconnects, the broker will deliver the queued messages, ensuring no data is lost during temporary disconnections.
 
 Additionally, the use of the "Keep Alive" functionality helps detect abnormal disconnections. Each client periodically sends a `PINGREQ` packet to the broker to indicate that it's online. If the broker doesn't receive a message or `PINGREQ` within a specified interval, it can close the connection, and then use the final reliability mechanism:
 
