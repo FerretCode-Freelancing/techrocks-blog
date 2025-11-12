@@ -35,314 +35,208 @@
                 </div>
 
                 <div class="container" style="margin-top: 1rem">
-                    <div class="border">
-                        <h1>Syncing Developer Secrets With Infisical</h1>
-                        <p><strong>By FerretCode</strong></p>
-                        <h2>So what is Infisical?</h2>
-                        <p>
-                            When working with a team of developers, it's
-                            important to keep development &amp; production
-                            secrets alike synced between each other to ensure a
-                            consistent state. However, there are several secret
-                            management tools that could fit the bill for this
-                            requirement.
-                        </p>
-                        <p>
-                            While SOPS, HashiCorp vault, and more could be good
-                            candidates for our secret management flow, I've
-                            found that Infisical has been my favorite platform
-                            to work with for this purpose.
-                        </p>
-                        <p>
-                            Infisical is an open-source secret management tool
-                            which is both self-hostable and also exposes an
-                            Infisical-hosted cloud dashboard. It has multiple
-                            integrations for Docker, docker-compose, Kubernetes,
-                            and more to sync secrets from your Infisical
-                            instance to other developer machines &amp; in
-                            production.
-                        </p>
-                        <h2>Building the Initial Local Development Flow</h2>
-                        <p>
-                            In one of our recent projects, I was tasked with
-                            setting up our Infisical -&gt; local &amp;
-                            production syncing mechanism. For this project, our
-                            backend stack was Go, TimescaleDB, MediaMTX for
-                            RTSP, and RabbitMQ. In local development, we used
-                            Make &amp; docker-compose and eventually deployed
-                            into production on a Kubernetes cluster.
-                        </p>
-                        <p>
-                            At first, our approach was to take a local
-                            <code>.env</code> file containing an Infisical
-                            machine identity &amp; project ID to generate an
-                            Infisical auth token that can be used by the CLI to
-                            pull secrets.
-                        </p>
-                        <p><code>.env</code>:</p>
-                        <pre><code class="language-.env">INFISICAL_CLIENT_ID=
-INFISICAL_CLIENT_SECRET=
-PROJECT_ID=
-</code></pre>
-                        <p><code>Makefile</code>:</p>
-                        <pre><code class="language-Makefile">include .env
-
-.PHONY up
-up:
-    INFISICAL_TOKEN=$$(infisical login --method=universal-auth --client-id=$(INFISICAL_CLIENT_ID) --client-secret=$(INFISICAL_CLIENT_SECRET) --silent --plain) \
-	PROJECT_ID=$(PROJECT_ID) docker-compose up --build
-</code></pre>
-                        <p>
-                            From there, we would add an entrypoint to each
-                            service in our docker-compose config to use
-                            infisical CLI &amp; pull the secrets that way:
-                        </p>
-                        <p><code>docker-compose.yaml</code>:</p>
-                        <pre><code class="language-yaml">services:
-    app:
-        environment:
-            - INFISICAL_TOKEN=${INFISICAL_TOKEN}
-            - PROJECT_ID=${PROJECT_ID}
-        depends_on:
-            postgres:
-                condition: service_healthy
-            rabbitmq:
-                condition: service_healthy
-        ports:
-            - &quot;4000:4000&quot;
-        build:
-            context: .
-            dockerfile: Dockerfile
-        volumes:
-            - ./:/app
-        entrypoint:
-            - infisical
-            - run
-            - --projectId
-            - ${PROJECT_ID}
-            - --
-            - air
-            - -c
-            - .air.toml
-    postgres:
-        image: postgres:latest
-        restart: unless-stopped
-        hostname: postgres.local
-        healthcheck:
-        test: [&quot;CMD-SHELL&quot;, &quot;pg_isready -U postgres&quot;]
-        interval: 5s
-        timeout: 20s
-        retries: 5
-        ports:
-            - &quot;5432:5432&quot;
-        environment:
-            - INFISICAL_TOKEN=${INFISICAL_TOKEN}
-            - PROJECT_ID=${PROJECT_ID}
-        entrypoint:
-            - /bin/sh
-            - -c
-            - |
-                # Install Infisical CLI
-                apt-get update &amp;&amp; apt-get install -y bash curl &amp;&amp; curl -1sLf \
-                    'https://dl.cloudsmith.io/public/infisical/infisical-cli/setup.deb.sh' | bash \
-                    &amp;&amp; apt-get update &amp;&amp; apt-get install -y infisical
-
-                infisical run --projectId=$PROJECT_ID -- docker-entrypoint.sh postgres
-        volumes:
-            - postgres-data:/var/lib/postgresql/data
-</code></pre>
-                        <p>
-                            While this did work, you can probably see that this
-                            solution was ugly, inflexible, and cumbersome.
-                            Having to add a new entrypoint for each service
-                            &amp; conforming to the image's base operating
-                            system was definitely not a very good flow.
-                            Additionally, you couldn't specify which environment
-                            variables each service needed, so every service
-                            would be injected with every environment variable --
-                            definitely not good.
-                        </p>
-                        <h2>Finding an Optimal Solution</h2>
-                        <p>The solution we decided on was as follows:</p>
-                        <p>From the perspective of the developer, you would:</p>
-                        <ol>
-                            <li>
-                                <p>Install the Infisical CLI locally</p>
-                            </li>
-                            <li>
-                                <p>Authenticate by either:</p>
-                                <ul>
-                                    <li>
-                                        Logging in with
-                                        <code>infisical login</code> through the
-                                        web dashboard
-                                    </li>
-                                    <li>
-                                        Generating an Infisical token with a
-                                        machine identity:
-                                        <code
-                                            >export INFISICAL_TOKEN=$(infisical
-                                            login --method=universal-auth
-                                            --client-id=&lt;identity-client-id&gt;
-                                            --client-secret=&lt;identity-client-secret&gt;
-                                            --silent --plain)</code
-                                        >
-                                    </li>
-                                </ul>
-                            </li>
-                            <li>
-                                <p><code>make up</code></p>
-                            </li>
-                            <li>
-                                <p>That's it.</p>
-                            </li>
-                        </ol>
-                        <p>Here were the changes we made our Docker setup:</p>
-                        <p>
-                            Instead of generating an Infisical token within our
-                            Makefile &amp; using Docker entrypoints, we changed
-                            our makefile to directly inject the secrets into the
-                            local environment:
-                        </p>
-                        <pre><code class="language-Makefile">.PHONY up
-up:
-    infisical run -- docker-compose up --build
-</code></pre>
-                        <p>
-                            With the secrets now in our local environment, we
-                            could inject them directly into each service in our
-                            docker-compose:
-                        </p>
-                        <pre><code class="language-yaml">services:
-    app:
-        build:
-            context: .
-            dockerfile: Dockerfile
-        ports:
-            - 4000:4000
-        environment:
-            - PORT
-            - DEV
-            - DATABASE_URL
-            - RATELIMIT_RPS
-            - RATELIMIT_MAX_BURST
-            - RATELIMIT_ENABLED
-            - CORS_TRUSTED_ORIGINS
-            - RABBITMQ_URL
-        volumes:
-            - ./:/app
-        depends_on:
-            - postgres
-            - rabbitmq
-</code></pre>
-                        <p>This flow works a lot better:</p>
-                        <ul>
-                            <li>It's much cleaner</li>
-                            <li>Allows for selective secret injection</li>
-                            <li>
-                                Simpler on the developer side as well since they
-                                don't have to configure a <code>.env</code>
-                            </li>
-                        </ul>
-                        <h2>Production Flow</h2>
-                        <p>
-                            Finally, for our production flow. We use Kubernetes
-                            to deploy our services, and conveniently, Infiscial
-                            has a native Kubernetes operator to sync secrets
-                            into a single Kubernetes secret from the dashboard.
-                        </p>
-                        <p>
-                            The config for each environment in Kubernetes looks
-                            something like this:
-                        </p>
-                        <pre><code class="language-yaml">apiVersion: secrets.infisical.com/v1alpha1
-kind: InfisicalSecret
-metadata:
-    name: infisicalsecret
-    namespace: project-name
-spec:
-    hostAPI: https://app.infisical.com/api
-    resyncInterval: 15
-    authentication:
-        universalAuth:
-            secretsScope:
-                projectSlug: slug
-                envSlug: prod
-                secretsPath: &quot;/&quot;
-            credentialsRef:
-                secretName: universal-auth-credentials
-                secretNamespace: default
-
-    managedKubeSecretReferences:
-        - secretName: managed-secret
-          secretNamespace: project-namespace
-          creationPolicy: &quot;Orphan&quot;
-</code></pre>
-                        <p>
-                            Each <code>InfisicalSecret</code> resource is used
-                            to configure how, where, and how often the Infisical
-                            Operator will sync secrets from the cloud (or a
-                            self-hosted instance).
-                        </p>
-                        <p>
-                            From there, once the secrets are consolidated, you
-                            can inject them selectively into your Kubernetes
-                            deployments:
-                        </p>
-                        <pre><code class="language-yaml">apiVersion: apps/v1
-kind: Deployment
-metadata:
-  name: project-api
-  labels:
-    app: project-api
-  namespace: project
-spec:
-  replicas: 1
-  selector:
-    matchLabels:
-      app: project-api
-  template:
-    metadata:
-      labels:
-        app: project-api
-    spec:
-      containers:
-        - name: project-api
-          image: app-image:latest
-          imagePullPolicy: Always
-          ports:
-            - containerPort: 3000
-          env:
-            - name: PORT
-              valueFrom:
-                secretKeyRef:
-                  name: managed-secret
-                  key: PORT
-                  optional: false
-            - name: DEV
-              valueFrom:
-                secretKeyRef:
-                  name: managed-secret
-                  key: DEV
-                  optional: false
-            - name: DATABASE_URL
-              valueFrom:
-                secretKeyRef:
-                  name: managed-secret
-                  key: DATABASE_URL
-                  optional: false
-            ...
-</code></pre>
-                        <h2>To Recap</h2>
-                        <p>
-                            Throughout this project, we developed a robust way
-                            of syncing secrets between local developer machines
-                            &amp; Infisical to ensure a consistent environment
-                            between developers. Additionally, we used the
-                            Infisical Kubernetes Operator to sync production
-                            secrets into the cluster from the cloud.
-                        </p>
-                    </div>
+                    <div class="border"><h1>Syncing Developer Secrets With Infisical</h1>
+<p><strong>By FerretCode</strong></p>
+<h2>So what is Infisical?</h2>
+<p>When working with a team of developers, it's important to keep development &amp; production secrets alike synced between each other to ensure a consistent state. However, there are several secret management tools that could fit the bill for this requirement.</p>
+<p>While SOPS, HashiCorp vault, and more could be good candidates for our secret management flow, I've found that Infisical has been my favorite platform to work with for this purpose.</p>
+<p>Infisical is an open-source secret management tool which is both self-hostable and also exposes an Infisical-hosted cloud dashboard. It has multiple integrations for Docker, docker-compose, Kubernetes, and more to sync secrets from your Infisical instance to other developer machines &amp; in production.</p>
+<h2>Building the Initial Local Development Flow</h2>
+<p>In one of our recent projects, I was tasked with setting up our Infisical -&gt; local &amp; production syncing mechanism. For this project, our backend stack was Go, TimescaleDB, MediaMTX for RTSP, and RabbitMQ. In local development, we used Make &amp; docker-compose and eventually deployed into production on a Kubernetes cluster.</p>
+<p>At first, our approach was to take a local <code>.env</code> file containing an Infisical machine identity &amp; project ID to generate an Infisical auth token that can be used by the CLI to pull secrets.</p>
+<p><code>.env</code>:</p>
+<pre tabindex="0" style="color:#f8f8f2;background-color:#272822;"><code><span style="display:flex;"><span>INFISICAL_CLIENT_ID<span style="color:#f92672">=</span>
+</span></span><span style="display:flex;"><span>INFISICAL_CLIENT_SECRET<span style="color:#f92672">=</span>
+</span></span><span style="display:flex;"><span>PROJECT_ID<span style="color:#f92672">=</span>
+</span></span></code></pre><p><code>Makefile</code>:</p>
+<pre tabindex="0" style="color:#f8f8f2;background-color:#272822;"><code><span style="display:flex;"><span><span style="color:#960050;background-color:#1e0010">include</span> <span style="color:#960050;background-color:#1e0010">.env</span>
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span><span style="color:#960050;background-color:#1e0010">.PHONY</span> <span style="color:#960050;background-color:#1e0010">up</span>
+</span></span><span style="display:flex;"><span><span style="color:#a6e22e">up</span><span style="color:#f92672">:</span>
+</span></span><span style="display:flex;"><span>    INFISICAL_TOKEN<span style="color:#f92672">=</span>$$<span style="color:#f92672">(</span>infisical login --method<span style="color:#f92672">=</span>universal-auth --client-id<span style="color:#f92672">=</span><span style="color:#66d9ef">$(</span>INFISICAL_CLIENT_ID<span style="color:#66d9ef">)</span> --client-secret<span style="color:#f92672">=</span><span style="color:#66d9ef">$(</span>INFISICAL_CLIENT_SECRET<span style="color:#66d9ef">)</span> --silent --plain<span style="color:#f92672">)</span> <span style="color:#ae81ff">\
+</span></span></span><span style="display:flex;"><span><span style="color:#ae81ff"></span>	PROJECT_ID<span style="color:#f92672">=</span><span style="color:#66d9ef">$(</span>PROJECT_ID<span style="color:#66d9ef">)</span> docker-compose up --build
+</span></span></code></pre><p>From there, we would add an entrypoint to each service in our docker-compose config to use infisical CLI &amp; pull the secrets that way:</p>
+<p><code>docker-compose.yaml</code>:</p>
+<pre tabindex="0" style="color:#f8f8f2;background-color:#272822;"><code><span style="display:flex;"><span><span style="color:#f92672">services</span>:
+</span></span><span style="display:flex;"><span>    <span style="color:#f92672">app</span>:
+</span></span><span style="display:flex;"><span>        <span style="color:#f92672">environment</span>:
+</span></span><span style="display:flex;"><span>            - <span style="color:#ae81ff">INFISICAL_TOKEN=${INFISICAL_TOKEN}</span>
+</span></span><span style="display:flex;"><span>            - <span style="color:#ae81ff">PROJECT_ID=${PROJECT_ID}</span>
+</span></span><span style="display:flex;"><span>        <span style="color:#f92672">depends_on</span>:
+</span></span><span style="display:flex;"><span>            <span style="color:#f92672">postgres</span>:
+</span></span><span style="display:flex;"><span>                <span style="color:#f92672">condition</span>: <span style="color:#ae81ff">service_healthy</span>
+</span></span><span style="display:flex;"><span>            <span style="color:#f92672">rabbitmq</span>:
+</span></span><span style="display:flex;"><span>                <span style="color:#f92672">condition</span>: <span style="color:#ae81ff">service_healthy</span>
+</span></span><span style="display:flex;"><span>        <span style="color:#f92672">ports</span>:
+</span></span><span style="display:flex;"><span>            - <span style="color:#e6db74">&#34;4000:4000&#34;</span>
+</span></span><span style="display:flex;"><span>        <span style="color:#f92672">build</span>:
+</span></span><span style="display:flex;"><span>            <span style="color:#f92672">context</span>: <span style="color:#ae81ff">.</span>
+</span></span><span style="display:flex;"><span>            <span style="color:#f92672">dockerfile</span>: <span style="color:#ae81ff">Dockerfile</span>
+</span></span><span style="display:flex;"><span>        <span style="color:#f92672">volumes</span>:
+</span></span><span style="display:flex;"><span>            - <span style="color:#ae81ff">./:/app</span>
+</span></span><span style="display:flex;"><span>        <span style="color:#f92672">entrypoint</span>:
+</span></span><span style="display:flex;"><span>            - <span style="color:#ae81ff">infisical</span>
+</span></span><span style="display:flex;"><span>            - <span style="color:#ae81ff">run</span>
+</span></span><span style="display:flex;"><span>            - --<span style="color:#ae81ff">projectId</span>
+</span></span><span style="display:flex;"><span>            - <span style="color:#ae81ff">${PROJECT_ID}</span>
+</span></span><span style="display:flex;"><span>            - --
+</span></span><span style="display:flex;"><span>            - <span style="color:#ae81ff">air</span>
+</span></span><span style="display:flex;"><span>            - -<span style="color:#ae81ff">c</span>
+</span></span><span style="display:flex;"><span>            - <span style="color:#ae81ff">.air.toml</span>
+</span></span><span style="display:flex;"><span>    <span style="color:#f92672">postgres</span>:
+</span></span><span style="display:flex;"><span>        <span style="color:#f92672">image</span>: <span style="color:#ae81ff">postgres:latest</span>
+</span></span><span style="display:flex;"><span>        <span style="color:#f92672">restart</span>: <span style="color:#ae81ff">unless-stopped</span>
+</span></span><span style="display:flex;"><span>        <span style="color:#f92672">hostname</span>: <span style="color:#ae81ff">postgres.local</span>
+</span></span><span style="display:flex;"><span>        <span style="color:#f92672">healthcheck</span>:
+</span></span><span style="display:flex;"><span>        <span style="color:#f92672">test</span>: [<span style="color:#e6db74">&#34;CMD-SHELL&#34;</span>, <span style="color:#e6db74">&#34;pg_isready -U postgres&#34;</span>]
+</span></span><span style="display:flex;"><span>        <span style="color:#f92672">interval</span>: <span style="color:#ae81ff">5s</span>
+</span></span><span style="display:flex;"><span>        <span style="color:#f92672">timeout</span>: <span style="color:#ae81ff">20s</span>
+</span></span><span style="display:flex;"><span>        <span style="color:#f92672">retries</span>: <span style="color:#ae81ff">5</span>
+</span></span><span style="display:flex;"><span>        <span style="color:#f92672">ports</span>:
+</span></span><span style="display:flex;"><span>            - <span style="color:#e6db74">&#34;5432:5432&#34;</span>
+</span></span><span style="display:flex;"><span>        <span style="color:#f92672">environment</span>:
+</span></span><span style="display:flex;"><span>            - <span style="color:#ae81ff">INFISICAL_TOKEN=${INFISICAL_TOKEN}</span>
+</span></span><span style="display:flex;"><span>            - <span style="color:#ae81ff">PROJECT_ID=${PROJECT_ID}</span>
+</span></span><span style="display:flex;"><span>        <span style="color:#f92672">entrypoint</span>:
+</span></span><span style="display:flex;"><span>            - <span style="color:#ae81ff">/bin/sh</span>
+</span></span><span style="display:flex;"><span>            - -<span style="color:#ae81ff">c</span>
+</span></span><span style="display:flex;"><span>            - |<span style="color:#e6db74">
+</span></span></span><span style="display:flex;"><span><span style="color:#e6db74">                # Install Infisical CLI
+</span></span></span><span style="display:flex;"><span><span style="color:#e6db74">                apt-get update &amp;&amp; apt-get install -y bash curl &amp;&amp; curl -1sLf \
+</span></span></span><span style="display:flex;"><span><span style="color:#e6db74">                    &#39;https://dl.cloudsmith.io/public/infisical/infisical-cli/setup.deb.sh&#39; | bash \
+</span></span></span><span style="display:flex;"><span><span style="color:#e6db74">                    &amp;&amp; apt-get update &amp;&amp; apt-get install -y infisical
+</span></span></span><span style="display:flex;"><span><span style="color:#e6db74">
+</span></span></span><span style="display:flex;"><span><span style="color:#e6db74">                infisical run --projectId=$PROJECT_ID -- docker-entrypoint.sh postgres</span>                
+</span></span><span style="display:flex;"><span>        <span style="color:#f92672">volumes</span>:
+</span></span><span style="display:flex;"><span>            - <span style="color:#ae81ff">postgres-data:/var/lib/postgresql/data</span>
+</span></span></code></pre><p>While this did work, you can probably see that this solution was ugly, inflexible, and cumbersome. Having to add a new entrypoint for each service &amp; conforming to the image's base operating system was definitely not a very good flow. Additionally, you couldn't specify which environment variables each service needed, so every service would be injected with every environment variable -- definitely not good.</p>
+<h2>Finding an Optimal Solution</h2>
+<p>The solution we decided on was as follows:</p>
+<p>From the perspective of the developer, you would:</p>
+<ol>
+<li>
+<p>Install the Infisical CLI locally</p>
+</li>
+<li>
+<p>Authenticate by either:</p>
+<ul>
+<li>Logging in with <code>infisical login</code> through the web dashboard</li>
+<li>Generating an Infisical token with a machine identity: <code>export INFISICAL_TOKEN=$(infisical login --method=universal-auth --client-id=&lt;identity-client-id&gt; --client-secret=&lt;identity-client-secret&gt; --silent --plain)</code></li>
+</ul>
+</li>
+<li>
+<p><code>make up</code></p>
+</li>
+<li>
+<p>That's it.</p>
+</li>
+</ol>
+<p>Here were the changes we made our Docker setup:</p>
+<p>Instead of generating an Infisical token within our Makefile &amp; using Docker entrypoints, we changed our makefile to directly inject the secrets into the local environment:</p>
+<pre tabindex="0" style="color:#f8f8f2;background-color:#272822;"><code><span style="display:flex;"><span><span style="color:#960050;background-color:#1e0010">.PHONY</span> <span style="color:#960050;background-color:#1e0010">up</span>
+</span></span><span style="display:flex;"><span><span style="color:#a6e22e">up</span><span style="color:#f92672">:</span>
+</span></span><span style="display:flex;"><span>    infisical run -- docker-compose up --build
+</span></span></code></pre><p>With the secrets now in our local environment, we could inject them directly into each service in our docker-compose:</p>
+<pre tabindex="0" style="color:#f8f8f2;background-color:#272822;"><code><span style="display:flex;"><span><span style="color:#f92672">services</span>:
+</span></span><span style="display:flex;"><span>    <span style="color:#f92672">app</span>:
+</span></span><span style="display:flex;"><span>        <span style="color:#f92672">build</span>:
+</span></span><span style="display:flex;"><span>            <span style="color:#f92672">context</span>: <span style="color:#ae81ff">.</span>
+</span></span><span style="display:flex;"><span>            <span style="color:#f92672">dockerfile</span>: <span style="color:#ae81ff">Dockerfile</span>
+</span></span><span style="display:flex;"><span>        <span style="color:#f92672">ports</span>:
+</span></span><span style="display:flex;"><span>            - <span style="color:#ae81ff">4000</span>:<span style="color:#ae81ff">4000</span>
+</span></span><span style="display:flex;"><span>        <span style="color:#f92672">environment</span>:
+</span></span><span style="display:flex;"><span>            - <span style="color:#ae81ff">PORT</span>
+</span></span><span style="display:flex;"><span>            - <span style="color:#ae81ff">DEV</span>
+</span></span><span style="display:flex;"><span>            - <span style="color:#ae81ff">DATABASE_URL</span>
+</span></span><span style="display:flex;"><span>            - <span style="color:#ae81ff">RATELIMIT_RPS</span>
+</span></span><span style="display:flex;"><span>            - <span style="color:#ae81ff">RATELIMIT_MAX_BURST</span>
+</span></span><span style="display:flex;"><span>            - <span style="color:#ae81ff">RATELIMIT_ENABLED</span>
+</span></span><span style="display:flex;"><span>            - <span style="color:#ae81ff">CORS_TRUSTED_ORIGINS</span>
+</span></span><span style="display:flex;"><span>            - <span style="color:#ae81ff">RABBITMQ_URL</span>
+</span></span><span style="display:flex;"><span>        <span style="color:#f92672">volumes</span>:
+</span></span><span style="display:flex;"><span>            - <span style="color:#ae81ff">./:/app</span>
+</span></span><span style="display:flex;"><span>        <span style="color:#f92672">depends_on</span>:
+</span></span><span style="display:flex;"><span>            - <span style="color:#ae81ff">postgres</span>
+</span></span><span style="display:flex;"><span>            - <span style="color:#ae81ff">rabbitmq</span>
+</span></span></code></pre><p>This flow works a lot better:</p>
+<ul>
+<li>It's much cleaner</li>
+<li>Allows for selective secret injection</li>
+<li>Simpler on the developer side as well since they don't have to configure a <code>.env</code></li>
+</ul>
+<h2>Production Flow</h2>
+<p>Finally, for our production flow. We use Kubernetes to deploy our services, and conveniently, Infiscial has a native Kubernetes operator to sync secrets into a single Kubernetes secret from the dashboard.</p>
+<p>The config for each environment in Kubernetes looks something like this:</p>
+<pre tabindex="0" style="color:#f8f8f2;background-color:#272822;"><code><span style="display:flex;"><span><span style="color:#f92672">apiVersion</span>: <span style="color:#ae81ff">secrets.infisical.com/v1alpha1</span>
+</span></span><span style="display:flex;"><span><span style="color:#f92672">kind</span>: <span style="color:#ae81ff">InfisicalSecret</span>
+</span></span><span style="display:flex;"><span><span style="color:#f92672">metadata</span>:
+</span></span><span style="display:flex;"><span>    <span style="color:#f92672">name</span>: <span style="color:#ae81ff">infisicalsecret</span>
+</span></span><span style="display:flex;"><span>    <span style="color:#f92672">namespace</span>: <span style="color:#ae81ff">project-name</span>
+</span></span><span style="display:flex;"><span><span style="color:#f92672">spec</span>:
+</span></span><span style="display:flex;"><span>    <span style="color:#f92672">hostAPI</span>: <span style="color:#ae81ff">https://app.infisical.com/api</span>
+</span></span><span style="display:flex;"><span>    <span style="color:#f92672">resyncInterval</span>: <span style="color:#ae81ff">15</span>
+</span></span><span style="display:flex;"><span>    <span style="color:#f92672">authentication</span>:
+</span></span><span style="display:flex;"><span>        <span style="color:#f92672">universalAuth</span>:
+</span></span><span style="display:flex;"><span>            <span style="color:#f92672">secretsScope</span>:
+</span></span><span style="display:flex;"><span>                <span style="color:#f92672">projectSlug</span>: <span style="color:#ae81ff">slug</span>
+</span></span><span style="display:flex;"><span>                <span style="color:#f92672">envSlug</span>: <span style="color:#ae81ff">prod</span>
+</span></span><span style="display:flex;"><span>                <span style="color:#f92672">secretsPath</span>: <span style="color:#e6db74">&#34;/&#34;</span>
+</span></span><span style="display:flex;"><span>            <span style="color:#f92672">credentialsRef</span>:
+</span></span><span style="display:flex;"><span>                <span style="color:#f92672">secretName</span>: <span style="color:#ae81ff">universal-auth-credentials</span>
+</span></span><span style="display:flex;"><span>                <span style="color:#f92672">secretNamespace</span>: <span style="color:#ae81ff">default</span>
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>    <span style="color:#f92672">managedKubeSecretReferences</span>:
+</span></span><span style="display:flex;"><span>        - <span style="color:#f92672">secretName</span>: <span style="color:#ae81ff">managed-secret</span>
+</span></span><span style="display:flex;"><span>          <span style="color:#f92672">secretNamespace</span>: <span style="color:#ae81ff">project-namespace</span>
+</span></span><span style="display:flex;"><span>          <span style="color:#f92672">creationPolicy</span>: <span style="color:#e6db74">&#34;Orphan&#34;</span>
+</span></span></code></pre><p>Each <code>InfisicalSecret</code> resource is used to configure how, where, and how often the Infisical Operator will sync secrets from the cloud (or a self-hosted instance).</p>
+<p>From there, once the secrets are consolidated, you can inject them selectively into your Kubernetes deployments:</p>
+<pre tabindex="0" style="color:#f8f8f2;background-color:#272822;"><code><span style="display:flex;"><span><span style="color:#f92672">apiVersion</span>: <span style="color:#ae81ff">apps/v1</span>
+</span></span><span style="display:flex;"><span><span style="color:#f92672">kind</span>: <span style="color:#ae81ff">Deployment</span>
+</span></span><span style="display:flex;"><span><span style="color:#f92672">metadata</span>:
+</span></span><span style="display:flex;"><span>  <span style="color:#f92672">name</span>: <span style="color:#ae81ff">project-api</span>
+</span></span><span style="display:flex;"><span>  <span style="color:#f92672">labels</span>:
+</span></span><span style="display:flex;"><span>    <span style="color:#f92672">app</span>: <span style="color:#ae81ff">project-api</span>
+</span></span><span style="display:flex;"><span>  <span style="color:#f92672">namespace</span>: <span style="color:#ae81ff">project</span>
+</span></span><span style="display:flex;"><span><span style="color:#f92672">spec</span>:
+</span></span><span style="display:flex;"><span>  <span style="color:#f92672">replicas</span>: <span style="color:#ae81ff">1</span>
+</span></span><span style="display:flex;"><span>  <span style="color:#f92672">selector</span>:
+</span></span><span style="display:flex;"><span>    <span style="color:#f92672">matchLabels</span>:
+</span></span><span style="display:flex;"><span>      <span style="color:#f92672">app</span>: <span style="color:#ae81ff">project-api</span>
+</span></span><span style="display:flex;"><span>  <span style="color:#f92672">template</span>:
+</span></span><span style="display:flex;"><span>    <span style="color:#f92672">metadata</span>:
+</span></span><span style="display:flex;"><span>      <span style="color:#f92672">labels</span>:
+</span></span><span style="display:flex;"><span>        <span style="color:#f92672">app</span>: <span style="color:#ae81ff">project-api</span>
+</span></span><span style="display:flex;"><span>    <span style="color:#f92672">spec</span>:
+</span></span><span style="display:flex;"><span>      <span style="color:#f92672">containers</span>:
+</span></span><span style="display:flex;"><span>        - <span style="color:#f92672">name</span>: <span style="color:#ae81ff">project-api</span>
+</span></span><span style="display:flex;"><span>          <span style="color:#f92672">image</span>: <span style="color:#ae81ff">app-image:latest</span>
+</span></span><span style="display:flex;"><span>          <span style="color:#f92672">imagePullPolicy</span>: <span style="color:#ae81ff">Always</span>
+</span></span><span style="display:flex;"><span>          <span style="color:#f92672">ports</span>:
+</span></span><span style="display:flex;"><span>            - <span style="color:#f92672">containerPort</span>: <span style="color:#ae81ff">3000</span>
+</span></span><span style="display:flex;"><span>          <span style="color:#f92672">env</span>:
+</span></span><span style="display:flex;"><span>            - <span style="color:#f92672">name</span>: <span style="color:#ae81ff">PORT</span>
+</span></span><span style="display:flex;"><span>              <span style="color:#f92672">valueFrom</span>:
+</span></span><span style="display:flex;"><span>                <span style="color:#f92672">secretKeyRef</span>:
+</span></span><span style="display:flex;"><span>                  <span style="color:#f92672">name</span>: <span style="color:#ae81ff">managed-secret</span>
+</span></span><span style="display:flex;"><span>                  <span style="color:#f92672">key</span>: <span style="color:#ae81ff">PORT</span>
+</span></span><span style="display:flex;"><span>                  <span style="color:#f92672">optional</span>: <span style="color:#66d9ef">false</span>
+</span></span><span style="display:flex;"><span>            - <span style="color:#f92672">name</span>: <span style="color:#ae81ff">DEV</span>
+</span></span><span style="display:flex;"><span>              <span style="color:#f92672">valueFrom</span>:
+</span></span><span style="display:flex;"><span>                <span style="color:#f92672">secretKeyRef</span>:
+</span></span><span style="display:flex;"><span>                  <span style="color:#f92672">name</span>: <span style="color:#ae81ff">managed-secret</span>
+</span></span><span style="display:flex;"><span>                  <span style="color:#f92672">key</span>: <span style="color:#ae81ff">DEV</span>
+</span></span><span style="display:flex;"><span>                  <span style="color:#f92672">optional</span>: <span style="color:#66d9ef">false</span>
+</span></span><span style="display:flex;"><span>            - <span style="color:#f92672">name</span>: <span style="color:#ae81ff">DATABASE_URL</span>
+</span></span><span style="display:flex;"><span>              <span style="color:#f92672">valueFrom</span>:
+</span></span><span style="display:flex;"><span>                <span style="color:#f92672">secretKeyRef</span>:
+</span></span><span style="display:flex;"><span>                  <span style="color:#f92672">name</span>: <span style="color:#ae81ff">managed-secret</span>
+</span></span><span style="display:flex;"><span>                  <span style="color:#f92672">key</span>: <span style="color:#ae81ff">DATABASE_URL</span>
+</span></span><span style="display:flex;"><span>                  <span style="color:#f92672">optional</span>: <span style="color:#66d9ef">false</span>
+</span></span><span style="display:flex;"><span>            <span style="color:#ae81ff">...</span>
+</span></span></code></pre><h2>To Recap</h2>
+<p>Throughout this project, we developed a robust way of syncing secrets between local developer machines &amp; Infisical to ensure a consistent environment between developers. Additionally, we used the Infisical Kubernetes Operator to sync production secrets into the cluster from the cloud.</p>
+</div>
                 </div>
             </div>
         </main>

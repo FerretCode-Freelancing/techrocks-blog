@@ -30,6 +30,10 @@ code {
     word-wrap: break-word;
 }
 
+code span {
+    font-family: "Courier Prime";
+}
+
 .header {
     font-size: 24px;
     color: #a9bb71;
